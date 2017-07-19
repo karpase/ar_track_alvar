@@ -86,6 +86,10 @@ std::string output_frame;
 int marker_resolution = 5; // default marker resolution
 int marker_margin = 2; // default marker margin
 
+tf::Quaternion avg_rotation (0,0,0,1);
+tf::Vector3 avg_origin (0,0,0);
+double alpha = 0.01;
+int baxter_display_marker = 1;
 
 //Debugging utility function
 void draw3dPoints(ARCloud::Ptr cloud, string frame, int color, int id, double rad)
@@ -384,9 +388,15 @@ void getPointCloudCallback (const sensor_msgs::PointCloud2ConstPtr &msg)
 	  double qz = p.quaternion[3];
 	  double qw = p.quaternion[0];
 
+
       tf::Quaternion rotation (qx,qy,qz,qw);
       tf::Vector3 origin (px,py,pz);
-      tf::Transform t (rotation, origin);
+
+      avg_rotation = rotation.slerp(avg_rotation, 1.0 - alpha);
+      avg_origin = avg_origin * (1.0 - alpha) + origin * alpha;
+
+
+      tf::Transform t (avg_rotation, avg_origin);
       tf::Vector3 markerOrigin (0, 0, 0);
       tf::Transform m (tf::Quaternion::getIdentity (), markerOrigin);
       tf::Transform markerPose = t * m; // marker pose in the camera frame
@@ -397,8 +407,18 @@ void getPointCloudCallback (const sensor_msgs::PointCloud2ConstPtr &msg)
 	  out << id;
 	  std::string id_string = out.str();
 	  markerFrame += id_string;
-	  tf::StampedTransform camToMarker (t, image_msg->header.stamp, image_msg->header.frame_id, markerFrame.c_str());
-	  tf_broadcaster->sendTransform(camToMarker);
+	  
+	  if (id == baxter_display_marker) {
+            tf::StampedTransform markerToCam (t.inverse(), image_msg->header.stamp, markerFrame.c_str(), "kinect2_link");
+            tf_broadcaster->sendTransform(markerToCam);
+          } else {
+            tf::StampedTransform camToMarker (t, image_msg->header.stamp, image_msg->header.frame_id, markerFrame.c_str());
+	    tf_broadcaster->sendTransform(camToMarker);
+          }
+
+
+          //cout << markerFrame.c_str() << " " << image_msg->header.frame_id << endl;
+
 
 	  //Create the rviz visualization messages
 	  tf::poseTFToMsg (markerPose, rvizMarker_.pose);
